@@ -1,0 +1,64 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "${RABBITMQ_AMQP_PORT:-5673}:5672"
+      - "${RABBITMQ_MANAGEMENT_PORT:-15673}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  orderapi:
+    build:
+      context: .
+      dockerfile: OrderApi/Dockerfile
+    ports:
+      - "${ORDER_API_PORT:-5080}:8080"
+    restart: unless-stopped
+    environment:
+      RabbitMQ__HostName: rabbitmq
+      RabbitMQ__Port: 5672
+      RabbitMQ__UserName: guest
+      RabbitMQ__Password: guest
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  orderworker:
+    build:
+      context: .
+      dockerfile: OrderWorker/Dockerfile
+    restart: unless-stopped
+    environment:
+      RabbitMQ__HostName: rabbitmq
+      RabbitMQ__Port: 5672
+      RabbitMQ__UserName: guest
+      RabbitMQ__Password: guest
+      OrderApi__BaseUrl: http://orderapi:8080/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      orderapi:
+        condition: service_started
+
+  frontend:
+    build:
+      context: .
+      dockerfile: order-client/Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    restart: unless-stopped
+    depends_on:
+      orderapi:
+        condition: service_started
+
+volumes:
+  rabbitmq_data:
+    driver: local
